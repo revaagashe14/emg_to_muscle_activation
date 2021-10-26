@@ -1,152 +1,181 @@
 %leastSquares(0,0,0,0,0,0,0,0,0,0,0)
 fullexample
-function f = leastSquares(A1)
+function f = leastSquares(input)
     
-    
-    A2 = A1(2);
-    A3 = A1(3);
-    A4 = A1(4);
-    A5 = A1(5);
-    A6 = A1(6);
-    A7 = A1(7);
-    A8 = A1(8);
-    din = A1(9);
-    y1in = A1(10);
-    y2in = A1(11);
-    A1 = A1(1);
+    A1 = input(1);    
+    A2 = input(2);
+    A3 = input(3);
+    A4 = input(4);
+    A5 = input(5);
+    A6 = input(6);
+    A7 = input(7);
+    A8 = input(8);
+    din = input(9);
+    y1in = input(10);
+	y2in = input(11);
     Ain = [A1; A2; A3; A4; A5; A6; A7; A8];
-  
-    
     
     t_end = 4000;
-
+% 
     b1 = y1in + y2in;
     b2 = y1in * y2in;
     alpha1 = 1 + b1 + b2;
-    
-    u = zeros(4000, 8);
-    v = zeros(4000, 8);
-   
+  
     f = 0;
-    
+    %din = din/5;
     dataMatrix = load('Data/s1.mat', 'dsfilt_emg', 'finger_kinematics'); 
     %dataMatrix
-    for trial = 1:3 %should be 3
-       % trial
-        for activity = 1:7 %should be 7
-            %activity
-                for t = 1:t_end  %t is the timestep (out of 4000)
-                    
+    for trial = 1:1 %should be 1:3
+        for activity = 5:5 %should be 1:7
+            
+            emg_signal = dataMatrix.('dsfilt_emg');
+            trial_activity_data = emg_signal{trial, activity};
 
-                    emg_signal = dataMatrix.('dsfilt_emg');
-                    trial_activity_data = emg_signal{trial, activity};
+            kinematics = dataMatrix.('finger_kinematics');
+            kinematics_data = kinematics{trial, activity};
+            
+            u = zeros(4000, 8); % neural activation (used to calc v)
+            v = zeros(4000, 8); % muscle activation
+            N = 15; %should be 15 for 15 dofs for the orig dataset
+            theta_targets = zeros(4000, 15);
+            theta_estimates = zeros(4000, 15);  %use gpr to find this, compute/estimate from EMG signal data
+  
+            for t = 1:4000  %t is the timestep (out of 4000)              
+                    %calculate theta_targets = correct joint angles for a
+                    %given joint positions for a specific trial and activity and timestep
+                    theta_targets(t,:) = calculateExpectedJointAngles(t, kinematics_data);
+                    % theta_targets
                     
-                    kinematics = dataMatrix.('finger_kinematics');
-                    kinematics_data = kinematics{trial, activity};
-                    
-                    %calculate theta_targets
-                    theta_targets = calculateExpectedJointAngles(t, kinematics_data);
-                    theta_targets
-                    
-                    N = length(theta_targets); %should be 8 for 8 muscles for the orig dataset
-                    theta_estimates = zeros(N);  %use gpr to find this
                    % trial_activity_data
-
+                   e = zeros(8, 4000);
                 % calculating e below
                     for x = 1:8  %x is the muscle (out of 8)
-                        %x
-                        e(t, x) = trial_activity_data(t, x);  % change this to get it from data
+                        %rectify using absolute value
+                        for i = 1:4000
+                            e(x,i) = abs(trial_activity_data(i, x));
+                        end
+                        % fix(trial_activity_data(:, x));  % change this to get it from data
+                        % normalize
+                        e(x, :) = e(x, :)/max(e(x, :));
+                                              
+                        % filter using a 2nd order butterworth filter
+                        fc = 4;
+                        fs = 200;
+
+                        [b,a] = butter(2,fc/(fs/2));
+
+                        e(x, :) = filter(b,a,e(x, :));
+                        %evaluate = e(t)
                         
-                        
-                        
-                        %evaluye = e(t,x)
-                        
+                        %make e continuous so t-din can be evaluated
+                        % funcEx = ts2func(e(x,:));
                         
                         % find u(t, x): (later account for base cases: what if din>t? are the if cases right)
-                        if (t-din >=1) && (t-din <= t)
-                            u(t, x) = u(t,x) + alpha1*e(round(t-din), x);
+                        t
+                        din
+                        alpha1;
+                        % fval = funcEx(t-din);
+
+                        if (t*5-din >=3) && (t*5-din <= 20000)
+                            % u(t, x) = alpha1*funcEx(t-din);
+                            u(t,x) = alpha1*e(x, round((t*5-din)/5));
+                            fprintf("here");
+                            
                         end
                         if (t-1 >=1)
                             u(t, x) = u(t,x) - b1*u(t-1, x);
+                            fprintf("here2");
                         end
 
                         if (t-2 >=1)
                             u(t, x) = u(t,x) - b2 * u(t-2, x);
-                        end             
-
+                            fprintf("here3");
+                        end  
+                        test = u(t,x);
 
                         % calculate v(t,x)
-                        v(t,x) = (exp(Ain(x)* u(t,x)) - 1) / (exp(Ain(x))-1);  %why is htis NaN
-                        a = v(t,x);
-                        
-                        b = Ain(x);
-                        
-                        
-                        c = u(t,x);
+                        v(t,x) = (exp(Ain(x)* u(t,x)) - 1) / (exp(Ain(x))-1);    
+                        test2 = v(t,x);
                         
                     end
-                    
-                    for dof = 1:15
-                        % use gpr to set theta_estimates(dof)
-                        meanfunc = @meanZero;
-                        likfunc = @likGauss;
-                        
-                        %meanfunc = @meanConst;
-                        covfunc = @covSEiso; 
+                    %center v(t,:) to have zero mean and unit variance
+                    %v(t,:) = (v(t,:) - mean(v(t,:)))/std(v(t,:));
+                                      
+            end
+            for dof = 1:15
+                % use gpr to set theta_estimates(dof)
+                dof
+                trial
+                activity
+                
+                meanfunc = @meanZero;
+                likfunc = @likGauss;                       
+                %meanfunc = @meanConst;
+                covfunc = @covSEiso; 
+                hyp = struct('mean',[], 'cov', [0,0], 'lik', -1);                            
+                % theta_targets(dof)
+                hyp2 = minimize(hyp, @gp, -20, @infGaussLik, meanfunc, covfunc, likfunc, v, theta_targets(:, dof));
 
-                        hyp = struct('mean', [], 'cov', [0,0], 'lik', 0);
-                            
-                        
-                        %theta_targets(dof)
-                        hyp2 = minimize(hyp, @gp, -20, @infGaussLik, meanfunc, covfunc, likfunc, v(t), theta_targets(dof));
+                hyp2
+                [predicted_mean, predicted_var] = gp(hyp2, @infGaussLik, meanfunc, covfunc, likfunc, v, theta_targets(:, dof));
 
-                       
-                        [predicted_mean, predicted_var] = gp(hyp2, @infGaussLik, meanfunc, covfunc, likfunc, v(t), theta_targets(dof));
-
-                        theta_estimates(dof) = predicted_mean;
-                        predicted_mean
-
-                        %calculate add this muscle's mean square error to f
-                        
-                        
-                        %figure out where f update should be in for loop
-                        %based on what the mean square loss shoudl be
-                        %calculating
-                        %rn it is the mean square loss over all timesteps
-                        %for all muscles for 3 trials of each activity
-                     
-                        f = f + (theta_estimates(x)-theta_targets(x))^2;
-
-                    end
-
+                theta_estimates(:, dof) = predicted_mean;
+                %calculate add this muscle's mean square error to f                      
+                %figure out where f update should be in for loop
+                %based on what the mean square loss shoudl be
+                %calculatings
+                %rn it is the mean square loss over all timesteps
+                %for all muscles for 3 trials of each activity
+                for i = 1:4000
+                    f = f + (theta_estimates(i, dof)-theta_targets(i, dof))^2;
                 end
+                                   
+            end
+            theta_estimates
+            theta_targets    
         end
     end
-    
 
+
+    
     f = f/N; 
+    f
+    A1
+    b1
+    b2
+    alpha1
+    din
  
 end
 
 function [x,fval,exitflag] = fullexample
 
 %x will be [Ain din y1in y2in]
-x0 = [-2,-1,-2,-1,-2,-1,-1.567,-1, 3, -0.123,0.75];
+x0 = [-2,-1,-2,-1,-2,-1,-1,-1, 10, 0.5, 0.5];
 %x0 = [0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0];
 lb = [-3; -3; -3; -3; -3; -3; -3; -3; 0;  -0.99999999999; -0.99999999999];
-ub = [0; 0; 0; 0; 0; 0; 0; 0;  Inf; 0.99999999999; 0.99999999999];
-Aeq = [0 0 0 0 0 0 0 0 0 0 0 ];
-beq = 0;
-A = [0 0 0 0 0 0 0 0 0 0 0  
-     0 0 0 0 0 0 0 0 0 0 0 
-     0 0 0 0 0 0 0 0 0 0 0 ];
-b = [0; 0; 0];
+ub = [0; 0; 0; 0; 0; 0; 0; 0;  20000; 0.99999999999; 0.99999999999];
+Aeq = [];
+beq = [];
+A = [];
 
-options = optimoptions('fmincon','Algorithm','active-set');
+b = [];
 
-[x,fval,exitflag] = fmincon(@leastSquares,x0,A,b,Aeq,beq,lb,ub, [], options);
+options = optimoptions('fmincon','Algorithm','sqp');
+options.StepTolerance = 1;
+options.OptimalityTolerance = 1;
+options = optimoptions('fmincon', 'Display', 'iter');
+
+[x,fval,exitflag] = fmincon(@leastSquares,x0,A,b,Aeq,beq,lb,ub,[],options);
 
 end
+
+% function [c, ceq] = confuneq(x)
+% c = 0;
+% ceq = x(13)*x(14) - x(10);
+% 
+% end
+
 
 function expectedJointAngles = calculateExpectedJointAngles(timestep, kinematicsData)
 expectedJointAngles = zeros(15, 1);
@@ -196,9 +225,6 @@ expectedJointAngles(14) = findAngleBetweenVectors(vec1, vec2); %little PIP
 
 [vec1, vec2] = findIndices(14, 15, 16, timestepData);
 expectedJointAngles(15) = findAngleBetweenVectors(vec1, vec2); %little DIP
-
-
-
 
 end
 
